@@ -23,4 +23,26 @@ At scale, you run the risk of cancelling important requests in-flight. These req
 - The horizontal autoscaler will be stressed, trying to fight to bring up enough capacity to suit what is essentially almost double your workload. Sure, you could rolling restart every single pod one by one by setting `.spec.strategy.rollingUpdate.maxUnavailable` to 1, but then you'll probably be waiting until the end of time, and not really solving the problem. Your cluster-autoscaler doesn't remove old nodes when you request additioanl capacity. You're paying for those empty nodes until they're cleaned up or reallocated to other work. If you're running at scale, this could easily be tens of nodes.
   - > Deployment also ensures that only a certain number of Pods are created above the desired number of Pods. By default, it ensures that at most 125% of the desired number of Pods are up (25% max surge).
 
-On a non-Kubernetes environment, this problem is already solved. In fact, a lot of what Puma does for process management is very olden-days in style.
+On a non-Kubernetes environment, this problem is already solved. In fact, a lot of what Puma does for process management is very olden-days in style. It expects you to update your underlying code directory and then send a SIGUSR2 to trigger a phased restart. This drops zero connections, and ensures a great client experience.
+
+Exerpt from Puma documentation:
+> Client experience
+> - In-flight requests are always served responses before the connection is closed gracefully
+> - Idle persistent connections are gracefully disconnected
+> - New connections are not lost, and clients will not experience any increase in latency (as long as the number of configured workers is greater than one)
+
+## Okay, I'm sold. How do we do this?
+
+The solution consists of the following components:
+- EKS -> to host your application's web servers (puma)
+- EFS -> to host your application's code (ruby + rails)
+- EFS Dynamic CSI provisioner -> to provision EFS volumes for your application's code on a per-pod basis
+- SIGNAL Lambda -> copies your application's code into the new dynamic PVs when they are created, also responsible for updates
+
+## Any other benefits?
+- Decreased startup time due to smaller container image sizes.
+- Out of band tag updates.
+- Knowing exactly what is deployed in an environment at any given time, across your entire fleet.
+- Single point of update, pluggable into any CI or CD.
+- Reduced cost, since additional capacity is not required. You're using the same capacity.
+- You can still update the underlying image using your existing deployment methodology, since you'll need your dependencies and may switch things like the Ruby version or the base image in the future.
